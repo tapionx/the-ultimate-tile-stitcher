@@ -4,7 +4,7 @@ import shapely.geometry
 import asyncio
 import aiohttp
 import json
-from random import random
+import random
 
 from utils import tile2latlon, latlon2tile
 
@@ -56,7 +56,7 @@ async def fetch_and_save(session : aiohttp.ClientSession, url : str, retries : i
         except aiohttp.client_exceptions.ClientResponseError:
             print('err')
             await asyncio.sleep(wait_for)
-            wait_for = wait_for * (1.0 * random() + 1.0)
+            wait_for = wait_for * (1.0 * random.random() + 1.0)
     return False
 
 async def main():
@@ -68,30 +68,38 @@ async def main():
 
     semaphore = asyncio.Semaphore(opts.max_connections)
 
-    for feat in opts.poly['features']:
-        poly = shapely.geometry.shape(feat['geometry'])
+    for zoom in reversed(range(6, opts.zoom + 1)):
 
-        async with aiohttp.ClientSession() as session:
-            tasks = []
-            urls = []
-            for x, y in tile_idxs_in_poly(poly, opts.zoom):
-                url = opts.url.format(z=opts.zoom, x=x, y=y)
-                with (await semaphore):
-                    filepath = os.path.join(opts.out_dir, '{}_{}_{}.png'.format(opts.zoom, x, y))
-                    if os.path.isfile(filepath):
-                        continue
-                    ret = fetch_and_save(session, url, opts.retries, filepath)
-                    urls.append(url)
-                    tasks.append(asyncio.ensure_future(ret))
-            
-            res : list = await asyncio.gather(*tasks)
-            n_failed = res.count(False)
+        print ('Downloading zoom {}...'.format(zoom))
 
-            for i, url in enumerate(urls):
-                if res[i] == False:
-                    failed_urls.append(url)
+        for feat in opts.poly['features']:
+            poly = shapely.geometry.shape(feat['geometry'])
 
-    print('Downloaded {}/{}'.format(len(tasks) - n_failed, len(tasks)))
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                urls = []
+                for x, y in tile_idxs_in_poly(poly, zoom):
+                    if '{s}' in opts.url:
+                        url = opts.url.format(s=random.choice(['a','b','c']), z=zoom, x=x, y=y)
+                    else:
+                        url = opts.url.format(z=zoom, x=x, y=y)
+                    with (await semaphore):
+                        os.makedirs(os.path.join(opts.out_dir, str(zoom), str(x)), exist_ok=True)
+                        filepath = os.path.join(opts.out_dir, str(zoom), str(x), '{}.png'.format(y))
+                        if os.path.isfile(filepath):
+                            continue
+                        ret = fetch_and_save(session, url, opts.retries, filepath)
+                        urls.append(url)
+                        tasks.append(asyncio.ensure_future(ret))
+                
+                res : list = await asyncio.gather(*tasks)
+                n_failed = res.count(False)
+
+                for i, url in enumerate(urls):
+                    if res[i] == False:
+                        failed_urls.append(url)
+
+        print('Downloaded {}/{}'.format(len(tasks) - n_failed, len(tasks)))
     return failed_urls
 
     
